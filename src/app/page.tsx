@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-function LeafIcon({ className }: { className?: string }) {
+function WheatIcon({ className }: { className?: string }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -12,10 +12,17 @@ function LeafIcon({ className }: { className?: string }) {
       strokeLinejoin="round"
       className={className}
     >
-      <path d="M12 2C6.5 2 2 6.5 2 12c0 3.5 1.8 6.5 4.5 8.3" />
-      <path d="M12 2c5.5 0 10 4.5 10 10 0 3.5-1.8 6.5-4.5 8.3" />
-      <path d="M12 2v20" />
-      <path d="M5 10c2.5 1 5 1 7 0 2-1 4.5-1 7 0" />
+      {/* Central stalk */}
+      <path d="M12 22V8" />
+      {/* Wheat grains - alternating left and right */}
+      <path d="M8 4c1.5 0 3 1 4 3" />
+      <path d="M16 4c-1.5 0-3 1-4 3" />
+      <path d="M7.5 7.5c1.5-.5 3 0 4.5 2" />
+      <path d="M16.5 7.5c-1.5-.5-3 0-4.5 2" />
+      <path d="M7 11c1.5-.5 3 0 5 1.5" />
+      <path d="M17 11c-1.5-.5-3 0-5 1.5" />
+      <path d="M8 14.5c1.2-.3 2.5 0 4 1" />
+      <path d="M16 14.5c-1.2-.3-2.5 0-4 1" />
     </svg>
   );
 }
@@ -91,7 +98,7 @@ export default function Home() {
       {/* Navigation */}
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6 md:px-12">
         <div className="flex items-center gap-2">
-          <LeafIcon className="h-6 w-6 text-sage-600" />
+          <WheatIcon className="h-6 w-6 text-sage-600" />
           <span className="font-serif text-lg font-semibold text-warm-800">
             Rooted Family
           </span>
@@ -269,7 +276,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6 py-12 md:px-12">
           <div className="flex flex-col items-center justify-between gap-6 md:flex-row">
             <div className="flex items-center gap-2">
-              <LeafIcon className="h-5 w-5 text-sage-600" />
+              <WheatIcon className="h-5 w-5 text-sage-600" />
               <span className="font-serif text-lg font-semibold text-warm-800">
                 Rooted Family
               </span>
