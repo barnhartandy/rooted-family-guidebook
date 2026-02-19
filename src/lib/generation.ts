@@ -14,29 +14,12 @@ import type { FormData } from "@/app/questionnaire/types";
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
-// -- In-memory job store --
+// -- Status update callback type --
 
-export interface Job {
-  status: "pending" | "generating" | "formatting" | "sending" | "done" | "error";
+export type StatusCallback = (status: {
+  status: string;
   step: string;
-  familyName: string;
-  memberNames: string[];
-  email: string;
-  error?: string;
-  createdAt: number;
-}
-
-export const jobs = new Map<string, Job>();
-
-// Clean up jobs older than 30 minutes
-setInterval(() => {
-  const cutoff = Date.now() - 30 * 60 * 1000;
-  for (const [id, job] of jobs) {
-    if (job.createdAt < cutoff) {
-      jobs.delete(id);
-    }
-  }
-}, 5 * 60 * 1000);
+}) => void;
 
 // -- Prompt construction --
 
@@ -71,7 +54,7 @@ function buildFamilyProfile(data: FormData): string {
   return profile;
 }
 
-function buildPrompt(data: FormData): string {
+export function buildPrompt(data: FormData): string {
   const children = data.members.filter((m) => m.role === "child");
   const adults = data.members.filter((m) => m.role === "parent" || m.role === "partner");
 
@@ -426,106 +409,77 @@ function buildDocx(markdown: string, familyName: string): Document {
   });
 }
 
-// -- Background generation --
+// -- Full generation pipeline (streaming status via callback) --
 
-export async function runGeneration(jobId: string, formData: FormData, email: string) {
-  const job = jobs.get(jobId);
-  if (!job) return;
+export async function runGeneration(
+  formData: FormData,
+  email: string,
+  onStatus?: StatusCallback
+): Promise<void> {
+  const notify = onStatus || (() => {});
 
-  try {
-    // Step 1: Generate with Claude
-    job.status = "generating";
-    job.step = "Writing your family\u2019s introduction...";
-    const prompt = buildPrompt(formData);
+  // Step 1: Generate with Claude
+  notify({ status: "generating", step: "Writing your family\u2019s guidebook..." });
+  const prompt = buildPrompt(formData);
 
-    const message = await anthropic.messages.create({
-      model: "claude-opus-4-0-20250514",
-      max_tokens: 16000,
-      messages: [{ role: "user", content: prompt }],
-    });
+  const message = await anthropic.messages.create({
+    model: "claude-opus-4-0-20250514",
+    max_tokens: 16000,
+    messages: [{ role: "user", content: prompt }],
+  });
 
-    const textBlock = message.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      throw new Error("No text content in Claude response");
-    }
-    const guidebookMarkdown = textBlock.text;
-
-    // Step 2: Build DOCX
-    job.status = "formatting";
-    job.step = "Formatting your guidebook...";
-    const familyName = formData.familyName || "Your";
-    const doc = buildDocx(guidebookMarkdown, familyName);
-    const buffer = await Packer.toBuffer(doc);
-
-    // Step 3: Send email
-    job.status = "sending";
-    job.step = "Sending to your inbox...";
-    const filename = `${familyName.replace(/[^a-zA-Z0-9]/g, "-")}-Family-Guidebook.docx`;
-
-    await resend.emails.send({
-      from: "The Rooted Family Guidebook <guidebook@rootedfamily.com>",
-      to: email,
-      subject: `Your ${familyName} Family Guidebook is Ready`,
-      html: `
-        <div style="font-family: Georgia, serif; max-width: 560px; margin: 0 auto; color: #3d3229;">
-          <h1 style="color: #2a221b; font-size: 24px; font-weight: normal;">
-            Your guidebook is here.
-          </h1>
-          <p style="color: #5c4f3d; line-height: 1.7; font-size: 16px;">
-            Hi ${familyName} family,
-          </p>
-          <p style="color: #5c4f3d; line-height: 1.7; font-size: 16px;">
-            We've crafted a personalized field guide just for your family.
-            Your guidebook is attached as a Word document \u2014 feel free to print it,
-            share it with your family, or keep it as a digital reference.
-          </p>
-          <p style="color: #5c4f3d; line-height: 1.7; font-size: 16px;">
-            This is the beginning of a more intentional relationship with
-            technology. We're rooting for you.
-          </p>
-          <p style="color: #9c8a72; font-size: 14px; margin-top: 32px;">
-            \u2014 The Rooted Family Team
-          </p>
-        </div>
-      `,
-      attachments: [
-        {
-          filename,
-          content: buffer.toString("base64"),
-          contentType:
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        },
-      ],
-    });
-
-    // Done
-    job.status = "done";
-    job.step = "Complete!";
-  } catch (err) {
-    console.error("Generate guidebook error:", err);
-    job.status = "error";
-    job.error = err instanceof Error ? err.message : "Failed to generate guidebook";
-    job.step = "Error";
+  const textBlock = message.content.find((b) => b.type === "text");
+  if (!textBlock || textBlock.type !== "text") {
+    throw new Error("No text content in Claude response");
   }
-}
+  const guidebookMarkdown = textBlock.text;
 
-// Helper to create a job and start generation
-export function createAndRunJob(formData: FormData, email: string): string {
-  const jobId = crypto.randomUUID();
-  const memberNames = formData.members.map((m: { name: string }) => m.name).filter(Boolean);
+  // Step 2: Build DOCX
+  notify({ status: "formatting", step: "Formatting your guidebook..." });
+  const familyName = formData.familyName || "Your";
+  const doc = buildDocx(guidebookMarkdown, familyName);
+  const buffer = await Packer.toBuffer(doc);
 
-  const job: Job = {
-    status: "pending",
-    step: "Starting...",
-    familyName: formData.familyName || "Your",
-    memberNames,
-    email,
-    createdAt: Date.now(),
-  };
-  jobs.set(jobId, job);
+  // Step 3: Send email
+  notify({ status: "sending", step: "Sending to your inbox..." });
+  const filename = `${familyName.replace(/[^a-zA-Z0-9]/g, "-")}-Family-Guidebook.docx`;
 
-  // Fire and forget
-  runGeneration(jobId, formData, email);
+  await resend.emails.send({
+    from: "The Rooted Family Guidebook <guidebook@rootedfamily.com>",
+    to: email,
+    subject: `Your ${familyName} Family Guidebook is Ready`,
+    html: `
+      <div style="font-family: Georgia, serif; max-width: 560px; margin: 0 auto; color: #3d3229;">
+        <h1 style="color: #2a221b; font-size: 24px; font-weight: normal;">
+          Your guidebook is here.
+        </h1>
+        <p style="color: #5c4f3d; line-height: 1.7; font-size: 16px;">
+          Hi ${familyName} family,
+        </p>
+        <p style="color: #5c4f3d; line-height: 1.7; font-size: 16px;">
+          We've crafted a personalized field guide just for your family.
+          Your guidebook is attached as a Word document \u2014 feel free to print it,
+          share it with your family, or keep it as a digital reference.
+        </p>
+        <p style="color: #5c4f3d; line-height: 1.7; font-size: 16px;">
+          This is the beginning of a more intentional relationship with
+          technology. We're rooting for you.
+        </p>
+        <p style="color: #9c8a72; font-size: 14px; margin-top: 32px;">
+          \u2014 The Rooted Family Team
+        </p>
+      </div>
+    `,
+    attachments: [
+      {
+        filename,
+        content: buffer.toString("base64"),
+        contentType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      },
+    ],
+  });
 
-  return jobId;
+  // Done
+  notify({ status: "done", step: "Complete!" });
 }

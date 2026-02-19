@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
-import { jobs, createAndRunJob } from "@/lib/generation";
+import { runGeneration } from "@/lib/generation";
 import type { FormData } from "@/app/questionnaire/types";
 
-// -- API routes --
+// Allow up to 5 minutes for Opus to generate the full guidebook
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
   try {
@@ -12,39 +12,62 @@ export async function POST(request: Request) {
     };
 
     if (!email) {
-      return NextResponse.json({ error: "Email is required" }, { status: 400 });
+      return new Response(JSON.stringify({ error: "Email is required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    const jobId = createAndRunJob(formData, email);
+    // Stream status updates back to the client via SSE
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const sendEvent = (data: { status: string; step: string }) => {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
+          );
+        };
 
-    return NextResponse.json({ jobId });
+        try {
+          // Send initial metadata
+          const memberNames = formData.members
+            .map((m: { name: string }) => m.name)
+            .filter(Boolean);
+          sendEvent({
+            status: "starting",
+            step: JSON.stringify({
+              familyName: formData.familyName || "Your",
+              memberNames,
+              email,
+            }),
+          });
+
+          await runGeneration(formData, email, sendEvent);
+        } catch (err) {
+          console.error("Generate guidebook error:", err);
+          const message =
+            err instanceof Error ? err.message : "Failed to generate guidebook";
+          sendEvent({ status: "error", step: message });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
   } catch (err) {
     console.error("Generate guidebook error:", err);
     const message =
       err instanceof Error ? err.message : "Failed to start generation";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
-}
-
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const jobId = searchParams.get("jobId");
-
-  if (!jobId) {
-    return NextResponse.json({ error: "jobId is required" }, { status: 400 });
-  }
-
-  const job = jobs.get(jobId);
-  if (!job) {
-    return NextResponse.json({ error: "Job not found" }, { status: 404 });
-  }
-
-  return NextResponse.json({
-    status: job.status,
-    step: job.step,
-    familyName: job.familyName,
-    memberNames: job.memberNames,
-    email: job.email,
-    error: job.error,
-  });
 }

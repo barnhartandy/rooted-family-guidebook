@@ -4,22 +4,14 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-type ServerStatus =
-  | "pending"
+type Phase =
+  | "verifying"
+  | "starting"
   | "generating"
   | "formatting"
   | "sending"
   | "done"
   | "error";
-
-interface JobState {
-  status: ServerStatus;
-  step: string;
-  familyName: string;
-  memberNames: string[];
-  email: string;
-  error?: string;
-}
 
 // Build the list of simulated chapter messages from member names
 function buildChapterMessages(memberNames: string[]): string[] {
@@ -44,9 +36,7 @@ export default function GeneratingClient() {
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("session_id");
 
-  const [phase, setPhase] = useState<
-    "verifying" | "starting" | "generating" | "formatting" | "sending" | "done" | "error"
-  >("verifying");
+  const [phase, setPhase] = useState<Phase>("verifying");
   const [familyName, setFamilyName] = useState("");
   const [email, setEmail] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -55,8 +45,8 @@ export default function GeneratingClient() {
   const [progress, setProgress] = useState(0);
 
   const triggered = useRef(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const messageRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Cycle through chapter messages during the "generating" phase
   useEffect(() => {
@@ -65,7 +55,6 @@ export default function GeneratingClient() {
         setCurrentMessageIndex((prev) => {
           const next = prev + 1;
           if (next >= chapterMessages.length) {
-            // Loop back, staying on the last few messages
             return Math.max(0, chapterMessages.length - 3);
           }
           return next;
@@ -81,7 +70,7 @@ export default function GeneratingClient() {
     const targets: Record<string, number> = {
       verifying: 5,
       starting: 10,
-      generating: 15, // Will be overridden by message-based progress
+      generating: 15,
       formatting: 85,
       sending: 95,
       done: 100,
@@ -89,7 +78,6 @@ export default function GeneratingClient() {
     };
 
     if (phase === "generating" && chapterMessages.length > 0) {
-      // Progress from 15% to 80% based on message index
       const pct = 15 + (currentMessageIndex / chapterMessages.length) * 65;
       setProgress(Math.min(pct, 80));
     } else {
@@ -121,52 +109,89 @@ export default function GeneratingClient() {
         .filter(Boolean);
       setChapterMessages(buildChapterMessages(memberNames));
 
-      // 2. Start the generation job
+      // 2. Start SSE stream to the generation endpoint
       setPhase("starting");
-      const genRes = await fetch("/api/generate-guidebook", {
+      const abortController = new AbortController();
+      abortRef.current = abortController;
+
+      const response = await fetch("/api/generate-guidebook", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           formData: sessionData.formData,
           email: sessionData.email,
         }),
+        signal: abortController.signal,
       });
-      const genData = await genRes.json();
 
-      if (genData.error) {
-        throw new Error(genData.error);
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Server error: ${response.status}`);
       }
 
-      const { jobId } = genData;
-      setPhase("generating");
+      // Read the SSE stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No response stream");
+      }
 
-      // 3. Poll for status
-      pollRef.current = setInterval(async () => {
-        try {
-          const pollRes = await fetch(
-            `/api/generate-guidebook?jobId=${encodeURIComponent(jobId)}`
-          );
-          const pollData: JobState = await pollRes.json();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-          if (pollData.status === "formatting") {
-            setPhase("formatting");
-          } else if (pollData.status === "sending") {
-            setPhase("sending");
-          } else if (pollData.status === "done") {
-            setPhase("done");
-            if (pollRef.current) clearInterval(pollRef.current);
-          } else if (pollData.status === "error") {
-            throw new Error(pollData.error || "Generation failed");
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from buffer
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              if (data.status === "starting") {
+                // Parse metadata from the step field
+                try {
+                  const meta = JSON.parse(data.step);
+                  if (meta.familyName) setFamilyName(meta.familyName);
+                  if (meta.email) setEmail(meta.email);
+                  if (meta.memberNames) {
+                    setChapterMessages(buildChapterMessages(meta.memberNames));
+                  }
+                } catch {
+                  // step wasn't JSON metadata, that's fine
+                }
+                setPhase("generating");
+              } else if (data.status === "generating") {
+                setPhase("generating");
+              } else if (data.status === "formatting") {
+                setPhase("formatting");
+              } else if (data.status === "sending") {
+                setPhase("sending");
+              } else if (data.status === "done") {
+                setPhase("done");
+              } else if (data.status === "error") {
+                throw new Error(data.step || "Generation failed");
+              }
+            } catch (parseErr) {
+              if (parseErr instanceof Error && parseErr.message !== "Generation failed") {
+                // JSON parse error — ignore partial data
+              } else {
+                throw parseErr;
+              }
+            }
           }
-        } catch (err) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          setErrorMessage(
-            err instanceof Error ? err.message : "An unexpected error occurred."
-          );
-          setPhase("error");
         }
-      }, 3000);
+      }
+
+      // If stream ended without a done/error status, check current phase
+      // (stream might have closed after done was sent)
     } catch (err) {
+      if ((err as Error).name === "AbortError") return;
       setErrorMessage(
         err instanceof Error ? err.message : "An unexpected error occurred."
       );
@@ -177,8 +202,8 @@ export default function GeneratingClient() {
   useEffect(() => {
     startGeneration();
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
       if (messageRef.current) clearInterval(messageRef.current);
+      if (abortRef.current) abortRef.current.abort();
     };
   }, [startGeneration]);
 

@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { createAndRunJob } from "@/lib/generation";
+import { runGeneration } from "@/lib/generation";
 import type { FormData } from "@/app/questionnaire/types";
+
+// Allow up to 5 minutes for webhook-triggered generation
+export const maxDuration = 300;
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -59,10 +62,13 @@ export async function POST(request: Request) {
         return NextResponse.json({ received: true });
       }
 
-      // Trigger guidebook generation
-      const jobId = createAndRunJob(formData, email);
+      // Run generation directly (no job store needed)
       console.log(
-        `Webhook: Started generation job ${jobId} for ${formData.familyName} family (${email})`
+        `Webhook: Starting generation for ${formData.familyName} family (${email})`
+      );
+      await runGeneration(formData, email);
+      console.log(
+        `Webhook: Completed generation for ${formData.familyName} family`
       );
     } catch (err) {
       console.error("Webhook: Error processing checkout session:", err);
