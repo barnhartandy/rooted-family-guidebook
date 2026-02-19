@@ -439,7 +439,7 @@ export async function runGeneration(jobId: string, formData: FormData, email: st
     const prompt = buildPrompt(formData);
 
     const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-opus-4-0-20250514",
       max_tokens: 16000,
       messages: [{ role: "user", content: prompt }],
     });
