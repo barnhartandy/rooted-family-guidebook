@@ -21,10 +21,10 @@ function env(name: string): string {
 }
 
 function getAnthropic() {
-  const apiKey = env("CLAUDE_API_KEY");
+  // Try CLAUDE_API_KEY first (local dev), then ANTHROPIC_API_KEY (Vercel)
+  const apiKey = env("CLAUDE_API_KEY") || env("ANTHROPIC_API_KEY");
   if (!apiKey) {
-    throw new Error("CLAUDE_API_KEY is not set. Available env keys: " +
-      Object.keys(process.env).filter(k => k.includes("CLAUDE") || k.includes("ANTHROP")).join(", "));
+    throw new Error("No Anthropic API key found. Set CLAUDE_API_KEY or ANTHROPIC_API_KEY.");
   }
   return new Anthropic({ apiKey });
 }
