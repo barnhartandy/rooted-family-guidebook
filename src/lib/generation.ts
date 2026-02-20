@@ -12,10 +12,11 @@ import { Resend } from "resend";
 import type { FormData } from "@/app/questionnaire/types";
 
 function getAnthropic() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  console.log("ANTHROPIC_API_KEY present:", !!apiKey, "length:", apiKey?.length, "starts with:", apiKey?.substring(0, 10));
+  // Turbopack/Next.js 16 consumes ANTHROPIC_API_KEY at compile time.
+  // Use CLAUDE_API_KEY as a workaround.
+  const apiKey = process.env.CLAUDE_API_KEY;
   if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY environment variable is not set");
+    throw new Error("CLAUDE_API_KEY is not set");
   }
   return new Anthropic({ apiKey });
 }
@@ -454,7 +455,8 @@ export async function runGeneration(
   notify({ status: "sending", step: "Sending to your inbox..." });
   const filename = `${familyName.replace(/[^a-zA-Z0-9]/g, "-")}-Family-Guidebook.docx`;
 
-  await getResend().emails.send({
+  console.log(`Sending email to ${email} with attachment ${filename} (${buffer.length} bytes)`);
+  const emailResult = await getResend().emails.send({
     from: "The Rooted Family Guidebook <onboarding@resend.dev>",
     to: email,
     subject: `Your ${familyName} Family Guidebook is Ready`,
@@ -489,6 +491,7 @@ export async function runGeneration(
       },
     ],
   });
+  console.log("Resend response:", JSON.stringify(emailResult));
 
   // Done
   notify({ status: "done", step: "Complete!" });
