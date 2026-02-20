@@ -84,7 +84,7 @@ ${buildFamilyProfile(data)}
 
 ---
 
-Write "The Rooted Family Guidebook" for the ${data.familyName} family. Use the following structure. Write substantial, rich content for each section — this is a full guidebook, not a summary. Aim for approximately 8,000-12,000 words total.
+Write "The Rooted Family Guidebook" for the ${data.familyName} family. Use the following structure. Write rich, personalized content for each section. Aim for approximately 4,000-6,000 words total. Be concise but meaningful — every sentence should feel tailored to this family.
 
 Use this exact structure with these exact section headings:
 
@@ -444,7 +444,7 @@ export async function runGeneration(
 
   const message = await getAnthropic().messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 16000,
+    max_tokens: 8000,
     messages: [{ role: "user", content: prompt }],
   });
 
