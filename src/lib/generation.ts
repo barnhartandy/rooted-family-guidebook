@@ -11,8 +11,18 @@ import {
 import { Resend } from "resend";
 import type { FormData } from "@/app/questionnaire/types";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
-const resend = new Resend(process.env.RESEND_API_KEY!);
+function getAnthropic() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  console.log("ANTHROPIC_API_KEY present:", !!apiKey, "length:", apiKey?.length, "starts with:", apiKey?.substring(0, 10));
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY environment variable is not set");
+  }
+  return new Anthropic({ apiKey });
+}
+
+function getResend() {
+  return new Resend(process.env.RESEND_API_KEY!);
+}
 
 // -- Status update callback type --
 
@@ -422,7 +432,7 @@ export async function runGeneration(
   notify({ status: "generating", step: "Writing your family\u2019s guidebook..." });
   const prompt = buildPrompt(formData);
 
-  const message = await anthropic.messages.create({
+  const message = await getAnthropic().messages.create({
     model: "claude-opus-4-0-20250514",
     max_tokens: 16000,
     messages: [{ role: "user", content: prompt }],
@@ -444,8 +454,8 @@ export async function runGeneration(
   notify({ status: "sending", step: "Sending to your inbox..." });
   const filename = `${familyName.replace(/[^a-zA-Z0-9]/g, "-")}-Family-Guidebook.docx`;
 
-  await resend.emails.send({
-    from: "The Rooted Family Guidebook <guidebook@rootedfamily.com>",
+  await getResend().emails.send({
+    from: "The Rooted Family Guidebook <onboarding@resend.dev>",
     to: email,
     subject: `Your ${familyName} Family Guidebook is Ready`,
     html: `
