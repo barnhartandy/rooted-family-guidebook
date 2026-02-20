@@ -11,18 +11,27 @@ import {
 import { Resend } from "resend";
 import type { FormData } from "@/app/questionnaire/types";
 
+// Turbopack statically replaces process.env.X at compile time.
+// This helper reads env vars at runtime by avoiding the static pattern.
+function env(name: string): string {
+  const val = (globalThis as Record<string, unknown>).process as
+    { env: Record<string, string | undefined> } | undefined;
+  const result = val?.env?.[name] || "";
+  return result;
+}
+
 function getAnthropic() {
-  // Turbopack/Next.js 16 consumes ANTHROPIC_API_KEY at compile time.
-  // Use CLAUDE_API_KEY as a workaround.
-  const apiKey = process.env.CLAUDE_API_KEY;
+  const apiKey = env("CLAUDE_API_KEY");
   if (!apiKey) {
-    throw new Error("CLAUDE_API_KEY is not set");
+    throw new Error("CLAUDE_API_KEY is not set. Available env keys: " +
+      Object.keys(process.env).filter(k => k.includes("CLAUDE") || k.includes("ANTHROP")).join(", "));
   }
   return new Anthropic({ apiKey });
 }
 
 function getResend() {
-  return new Resend(process.env.RESEND_API_KEY!);
+  const apiKey = env("RESEND_API_KEY");
+  return new Resend(apiKey);
 }
 
 // -- Status update callback type --
