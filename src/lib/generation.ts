@@ -195,7 +195,7 @@ function parseMarkdownToDocx(markdown: string): Paragraph[] {
     const line = lines[i];
 
     if (line.trim() === "---") {
-      paragraphs.push(new Paragraph({ children: [new PageBreak()] }));
+      // Skip --- separators; ## headings already insert page breaks
       i++;
       continue;
     }
