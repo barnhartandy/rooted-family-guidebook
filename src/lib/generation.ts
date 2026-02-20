@@ -464,7 +464,8 @@ export async function runGeneration(
   notify({ status: "sending", step: "Sending to your inbox..." });
   const filename = `${familyName.replace(/[^a-zA-Z0-9]/g, "-")}-Family-Guidebook.docx`;
 
-  console.log(`Sending email to ${email} with attachment ${filename} (${buffer.length} bytes)`);
+  const resendKey = env("RESEND_API_KEY");
+  console.log(`Sending email to ${email} with attachment ${filename} (${buffer.length} bytes). Resend key present: ${!!resendKey}`);
   const emailResult = await getResend().emails.send({
     from: "The Rooted Family Guidebook <onboarding@resend.dev>",
     to: email,

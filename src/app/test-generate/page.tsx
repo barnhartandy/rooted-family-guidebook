@@ -111,12 +111,10 @@ export default function TestGenerate() {
               if (data.status === "done") setStatus("done");
               if (data.status === "error") {
                 setStatus("error");
-                throw new Error(data.step);
+                setMessages((prev) => [...prev, `ERROR: ${data.step}`]);
               }
-            } catch (e) {
-              if (e instanceof Error && e.message !== "Generation failed") {
-                // parse error, skip
-              }
+            } catch {
+              // JSON parse error, skip partial data
             }
           }
         }
